@@ -33,6 +33,8 @@ SQLITE_SNAPSHOTS = {
         "BUCKET": "my-snapshot-bucket",
         "PREFIX": "app/sqlite/",
         "REGION": "us-east-1",
+        "SERVER_SIDE_ENCRYPTION": "aws:kms",
+        "KMS_KEY_ID": "alias/my-snapshot-key",
     },
     "RETENTION": {
         "KEEP_LAST": 20,

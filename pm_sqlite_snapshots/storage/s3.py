@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from urllib.parse import urlparse
 
@@ -7,12 +9,29 @@ from . import SnapshotRef
 
 
 class S3SnapshotStorage:
-    def __init__(self, *, bucket: str, prefix: str = "", region: str | None = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        bucket: str,
+        prefix: str = "",
+        region: str | None = None,
+        server_side_encryption: str | None = None,
+        kms_key_id: str | None = None,
+        storage_class: str | None = None,
+        **kwargs,
+    ):
         if not bucket:
             raise ValueError("SQLITE_SNAPSHOTS STORAGE.BUCKET is required")
         self.bucket = bucket
         self.prefix = prefix.strip("/")
         self.client = boto3.client("s3", region_name=region or None)
+        self.extra_args = {}
+        if server_side_encryption:
+            self.extra_args["ServerSideEncryption"] = server_side_encryption
+        if kms_key_id:
+            self.extra_args["SSEKMSKeyId"] = kms_key_id
+        if storage_class:
+            self.extra_args["StorageClass"] = storage_class
 
     @classmethod
     def from_config(cls, config: dict):
@@ -20,6 +39,9 @@ class S3SnapshotStorage:
             bucket=config.get("BUCKET", ""),
             prefix=config.get("PREFIX", ""),
             region=config.get("REGION"),
+            server_side_encryption=config.get("SERVER_SIDE_ENCRYPTION"),
+            kms_key_id=config.get("KMS_KEY_ID"),
+            storage_class=config.get("STORAGE_CLASS"),
         )
 
     def upload(self, database_path: str, manifest: dict) -> SnapshotRef:
@@ -28,12 +50,14 @@ class S3SnapshotStorage:
         database_key = f"{base}.sqlite3.gz"
         manifest_key = f"{base}.manifest.json"
 
-        self.client.upload_file(database_path, self.bucket, database_key)
+        upload_kwargs = {"ExtraArgs": self.extra_args} if self.extra_args else {}
+        self.client.upload_file(database_path, self.bucket, database_key, **upload_kwargs)
         self.client.put_object(
             Bucket=self.bucket,
             Key=manifest_key,
             Body=json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"),
             ContentType="application/json",
+            **self.extra_args,
         )
         latest = {
             "snapshot_id": snapshot_id,
@@ -47,6 +71,7 @@ class S3SnapshotStorage:
             Key=self._key("latest.json"),
             Body=json.dumps(latest, indent=2, sort_keys=True).encode("utf-8"),
             ContentType="application/json",
+            **self.extra_args,
         )
         return SnapshotRef(**latest)
 
