@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pm-sqlite-snapshots"
+version = "0.1.0"
+description = "Django SQLite snapshot export and restore helpers for ephemeral deployments"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "django>=4.2",
+    "boto3>=1.26",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pm_sqlite_snapshots*"]
