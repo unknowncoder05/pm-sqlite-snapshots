@@ -2,6 +2,7 @@ import logging
 import os
 import signal
 import sys
+from pathlib import Path
 
 from django.apps import AppConfig
 
@@ -37,6 +38,14 @@ class SQLiteSnapshotsConfig(AppConfig):
 
 def _is_management_command_without_runtime_hooks():
     if len(sys.argv) < 2:
+        return False
+    executable = Path(sys.argv[0]).name
+    runtime_commands = {
+        "daphne",
+        "gunicorn",
+        "uvicorn",
+    }
+    if executable in runtime_commands:
         return False
     if sys.argv[0].endswith("manage.py") and sys.argv[1] != "runserver":
         return True

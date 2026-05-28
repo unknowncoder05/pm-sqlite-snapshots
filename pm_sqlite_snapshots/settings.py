@@ -14,6 +14,7 @@ class SnapshotSettings:
     export_on_shutdown: bool
     restore_on_startup: bool
     restore_if_db_missing: bool
+    restore_if_db_empty: bool
     fail_startup_if_restore_missing: bool
     lock_path: str
     storage: dict[str, Any]
@@ -29,6 +30,7 @@ def get_snapshot_settings() -> SnapshotSettings:
         export_on_shutdown=bool(raw.get("EXPORT_ON_SHUTDOWN", True)),
         restore_on_startup=bool(raw.get("RESTORE_ON_STARTUP", False)),
         restore_if_db_missing=bool(raw.get("RESTORE_IF_DB_MISSING", True)),
+        restore_if_db_empty=bool(raw.get("RESTORE_IF_DB_EMPTY", True)),
         fail_startup_if_restore_missing=bool(raw.get("FAIL_STARTUP_IF_RESTORE_MISSING", False)),
         lock_path=raw.get("LOCK_PATH", "/tmp/pm_sqlite_snapshots.lock"),
         storage=raw.get("STORAGE", {}),

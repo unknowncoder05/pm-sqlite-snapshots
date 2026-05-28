@@ -17,9 +17,12 @@ def maybe_restore_on_startup(config):
     if not config.restore_on_startup:
         return
     db_path = get_sqlite_database_path(config.database_alias)
-    if os.path.exists(db_path) and not config.restore_if_db_missing:
+    db_exists = os.path.exists(db_path)
+    if db_exists and config.restore_if_db_empty and not _database_has_application_data(db_path):
+        pass
+    elif db_exists and not config.restore_if_db_missing:
         return
-    if os.path.exists(db_path):
+    elif db_exists:
         return
     try:
         snapshot = restore_snapshot(config, force=True)
@@ -81,3 +84,29 @@ def _delegate_signal(previous_handler, signum, frame):
         previous_handler(signum, frame)
     elif previous_handler == signal.SIG_DFL:
         raise SystemExit(128 + signum)
+
+
+def _database_has_application_data(db_path):
+    import sqlite3
+
+    ignored_tables = {
+        "auth_group",
+        "auth_group_permissions",
+        "auth_permission",
+        "auth_user_groups",
+        "auth_user_user_permissions",
+    }
+    connection = sqlite3.connect(db_path)
+    try:
+        rows = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+        for (table_name,) in rows:
+            if table_name.startswith(("django_", "sqlite_")) or table_name in ignored_tables:
+                continue
+            count = connection.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+            if count:
+                return True
+        return False
+    finally:
+        connection.close()
