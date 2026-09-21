@@ -5,7 +5,7 @@ import os
 import signal
 import threading
 
-from .core import SnapshotError, export_snapshot, get_sqlite_database_path, restore_snapshot
+from .core import SnapshotError, export_lock, export_snapshot, get_sqlite_database_path, restore_snapshot, startup_lock_path
 
 logger = logging.getLogger(__name__)
 
@@ -17,20 +17,21 @@ def maybe_restore_on_startup(config):
     if not config.restore_on_startup:
         return
     db_path = get_sqlite_database_path(config.database_alias)
-    db_exists = os.path.exists(db_path)
-    if db_exists and config.restore_if_db_empty and not _database_has_application_data(db_path):
-        pass
-    elif db_exists and not config.restore_if_db_missing:
-        return
-    elif db_exists:
-        return
-    try:
-        snapshot = restore_snapshot(config, force=True)
-        logger.info("Restored SQLite snapshot %s on startup", snapshot.snapshot_id)
-    except SnapshotError:
-        if config.fail_startup_if_restore_missing:
-            raise
-        logger.warning("No SQLite snapshot restored on startup", exc_info=True)
+    with export_lock(startup_lock_path(db_path)):
+        db_exists = os.path.exists(db_path)
+        if db_exists and config.restore_if_db_empty and not _database_has_application_data(db_path):
+            pass
+        elif db_exists:
+            return
+        elif not config.restore_if_db_missing:
+            return
+        try:
+            snapshot = restore_snapshot(config, force=db_exists)
+            logger.info("Restored SQLite snapshot %s on startup", snapshot.snapshot_id)
+        except SnapshotError:
+            if config.fail_startup_if_restore_missing:
+                raise
+            logger.warning("No SQLite snapshot restored on startup", exc_info=True)
 
 
 def start_scheduler(config):

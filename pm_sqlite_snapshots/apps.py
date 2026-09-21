@@ -16,6 +16,7 @@ class SQLiteSnapshotsConfig(AppConfig):
 
     def ready(self):
         from .runtime import install_signal_handlers, maybe_restore_on_startup, start_scheduler
+        from .identity import prepare_snapshot_startup
         from .settings import get_snapshot_settings
 
         config = get_snapshot_settings()
@@ -27,6 +28,7 @@ class SQLiteSnapshotsConfig(AppConfig):
             return
 
         try:
+            prepare_snapshot_startup(config)
             maybe_restore_on_startup(config)
             start_scheduler(config)
             install_signal_handlers(config)

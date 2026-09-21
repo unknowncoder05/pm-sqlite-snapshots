@@ -19,10 +19,14 @@ class SnapshotSettings:
     lock_path: str
     storage: dict[str, Any]
     retention: dict[str, Any]
+    require_identity_receipt: bool = False
 
 
 def get_snapshot_settings() -> SnapshotSettings:
     raw = getattr(settings, "SQLITE_SNAPSHOTS", {}) or {}
+    storage = raw.get("STORAGE", {})
+    if raw.get("ENABLED") and any(token in str(storage.get("PREFIX", "")) for token in ("{{", "}}", "{%", "%}")):
+        raise ValueError("SQLite snapshot storage prefix must be a rendered, stable identity")
     return SnapshotSettings(
         enabled=bool(raw.get("ENABLED", False)),
         database_alias=raw.get("DATABASE_ALIAS", "default"),
@@ -33,6 +37,7 @@ def get_snapshot_settings() -> SnapshotSettings:
         restore_if_db_empty=bool(raw.get("RESTORE_IF_DB_EMPTY", True)),
         fail_startup_if_restore_missing=bool(raw.get("FAIL_STARTUP_IF_RESTORE_MISSING", False)),
         lock_path=raw.get("LOCK_PATH", "/tmp/pm_sqlite_snapshots.lock"),
-        storage=raw.get("STORAGE", {}),
+        storage=storage,
         retention=raw.get("RETENTION", {"KEEP_LAST": 20}),
+        require_identity_receipt=bool(raw.get("REQUIRE_IDENTITY_RECEIPT", False)),
     )

@@ -67,11 +67,44 @@ def restore_snapshot(config: SnapshotSettings, snapshot_id: str | None = None, f
                     )
             _gunzip_file(compressed_path, restored_path)
             _validate_sqlite(restored_path)
-            replacement_path = f"{db_path}.restore_tmp"
-            shutil.copy2(restored_path, replacement_path)
-            connections.close_all()
-            os.replace(replacement_path, db_path)
+            # Stage on the destination filesystem. Each restore owns its file;
+            # concurrent containers must never share a fixed .restore_tmp path.
+            descriptor, replacement_path = tempfile.mkstemp(
+                prefix=".pm-sqlite-restore-", dir=os.path.dirname(db_path),
+            )
+            os.close(descriptor)
+            try:
+                shutil.copy2(restored_path, replacement_path)
+                connections.close_all()
+                if force:
+                    os.replace(replacement_path, db_path)
+                else:
+                    # Atomic no-clobber publication: an existence check alone
+                    # cannot protect a database created during the download.
+                    try:
+                        os.link(replacement_path, db_path)
+                    except FileExistsError as exc:
+                        raise SnapshotError(
+                            f"Database appeared at {db_path} during restore; existing data was retained"
+                        ) from exc
+            finally:
+                if os.path.exists(replacement_path):
+                    os.unlink(replacement_path)
     return snapshot
+
+
+def restore_snapshot_if_missing(config: SnapshotSettings, snapshot_id: str | None = None):
+    """Restore once on a shared volume, without replacing an existing database."""
+    db_path = get_sqlite_database_path(config.database_alias)
+    with export_lock(startup_lock_path(db_path)):
+        if os.path.exists(db_path):
+            return None
+        return restore_snapshot(config, snapshot_id=snapshot_id)
+
+
+def startup_lock_path(db_path: str) -> str:
+    # /tmp can be private to each container even when the database is shared.
+    return f"{db_path}.startup.lock"
 
 
 def list_snapshots(config: SnapshotSettings):

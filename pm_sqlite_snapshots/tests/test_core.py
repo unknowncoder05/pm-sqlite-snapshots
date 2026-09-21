@@ -1,5 +1,7 @@
 import os
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import django
 import pytest
@@ -18,7 +20,7 @@ if not settings.configured:
 from django.test import override_settings
 
 from pm_sqlite_snapshots.apps import _is_management_command_without_runtime_hooks
-from pm_sqlite_snapshots.core import SnapshotError, export_snapshot, list_snapshots, prune_snapshots, restore_snapshot
+from pm_sqlite_snapshots.core import SnapshotError, export_snapshot, list_snapshots, prune_snapshots, restore_snapshot, restore_snapshot_if_missing
 from pm_sqlite_snapshots.runtime import maybe_restore_on_startup
 from pm_sqlite_snapshots.settings import SnapshotSettings
 
@@ -75,6 +77,59 @@ def test_restore_rejects_checksum_mismatch(tmp_path):
 
         with pytest.raises(SnapshotError, match="checksum mismatch"):
             restore_snapshot(config, force=True)
+
+
+def test_concurrent_restore_if_missing_preserves_first_restore(tmp_path):
+    db_path = tmp_path / "app.sqlite3"
+    storage_path = tmp_path / "snapshots"
+    _write_database(db_path, "snapshot")
+    config = _config(tmp_path, db_path, storage_path)
+
+    with override_settings(
+        DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": str(db_path)}}
+    ):
+        _set_database_path(db_path)
+        snapshot = export_snapshot(config)
+        os.remove(db_path)
+        barrier = Barrier(2)
+
+        def attempt_restore():
+            barrier.wait()
+            return restore_snapshot_if_missing(config)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: attempt_restore(), range(2)))
+
+        assert sum(result is not None for result in results) == 1
+        assert next(result for result in results if result is not None).snapshot_id == snapshot.snapshot_id
+        assert _read_value(db_path) == "snapshot"
+        assert restore_snapshot_if_missing(config) is None
+
+
+def test_restore_preserves_database_created_during_download(tmp_path, monkeypatch):
+    from pm_sqlite_snapshots.storage.local import LocalSnapshotStorage
+
+    db_path = tmp_path / 'app.sqlite3'
+    storage_path = tmp_path / 'snapshots'
+    config = _config(tmp_path, db_path, storage_path)
+    _write_database(db_path, 'old snapshot')
+    with override_settings(
+        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': str(db_path)}}
+    ):
+        _set_database_path(db_path)
+        export_snapshot(config)
+        os.remove(db_path)
+        download = LocalSnapshotStorage.download
+
+        def concurrent_creation(storage, snapshot, destination):
+            download(storage, snapshot, destination)
+            _write_database(db_path, 'new live data')
+
+        monkeypatch.setattr(LocalSnapshotStorage, 'download', concurrent_creation)
+        with pytest.raises(SnapshotError, match='existing data was retained'):
+            restore_snapshot(config)
+        assert _read_value(db_path) == 'new live data'
+        assert not list(tmp_path.glob('.pm-sqlite-restore-*'))
 
 
 def test_prune_keeps_latest_snapshot_even_when_outside_keep_window(tmp_path):
